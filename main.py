@@ -21,7 +21,7 @@ from crawl4ai import (AsyncWebCrawler, BrowserConfig, CacheMode,
                       CrawlerRunConfig, CrawlResult)
 
 
-async def _crawl_parallel(urls: List[str], max_concurrent: int = 3):
+async def _crawl_parallel(urls: List[str], html_output: bool, max_concurrent: int = 3):
     logger.info("\n=== Parallel Crawling with Browser Reuse ===")
 
     # Minimal browser config
@@ -61,7 +61,7 @@ async def _crawl_parallel(urls: List[str], max_concurrent: int = 3):
                     fail_count += 1
                 elif result.success:
                     success_count += 1
-                    _save_markdown_to_result_dir(result)
+                    _save_markdown_to_result_dir(result, html_output)
                 else:
                     fail_count += 1
 
@@ -74,23 +74,28 @@ async def _crawl_parallel(urls: List[str], max_concurrent: int = 3):
         await crawler.close()
 
 
-def _save_markdown_to_result_dir(result: CrawlResult):
+def _save_markdown_to_result_dir(result: CrawlResult, html_output: bool):
     """
     Saves the markdown content to a file in the output directory.
 
     Args:
         result (CrawlResult): The crawl result
     """
-    if result.markdown:
-        # Convert result.url to a filename
-        filename = (
-            result.url.replace("https://", "").replace("/", "_").replace(".", "_")
-        )
+    # Convert result.url to a filename
+    filename = result.url.replace("https://", "").replace("/", "_").replace(".", "_")
 
-        # Save the markdown content to a file
-        output_file = os.path.join(__output__, f"{filename}.md")
-        with open(output_file, "w", encoding="utf-8") as f:
-            f.write(result.markdown)  # pyright: ignore [reportArgumentType]
+    if html_output:
+        if result.html:
+            # Save the html content to a file
+            output_file = os.path.join(__output__, f"{filename}.html")
+            with open(output_file, "w", encoding="utf-8") as f:
+                f.write(result.html)  # pyright: ignore [reportArgumentType]
+    else:
+        if result.markdown:
+            # Save the markdown content to a file
+            output_file = os.path.join(__output__, f"{filename}.md")
+            with open(output_file, "w", encoding="utf-8") as f:
+                f.write(result.markdown)  # pyright: ignore [reportArgumentType]
 
 
 def _get_urls_to_crawl(sitemap_url: str) -> list[str]:
@@ -117,19 +122,6 @@ def _get_urls_to_crawl(sitemap_url: str) -> list[str]:
     except Exception as e:
         logger.exception("Error fetching sitemap")
         return []
-
-
-def _get_sitemap_url() -> str:
-    """
-    Parses the command line arguments to get the sitemap URL.
-
-    Returns:
-        str: The sitemap URL
-    """
-    parser = argparse.ArgumentParser(description="Crawl URLs from a sitemap")
-    parser.add_argument("sitemap_url", type=str, help="URL of the sitemap")
-    args = parser.parse_args()
-    return args.sitemap_url
 
 
 def _get_child_sitemaps(base_sitemap_url: str) -> list[str]:
@@ -160,9 +152,28 @@ def _get_child_sitemaps(base_sitemap_url: str) -> list[str]:
         return []
 
 
+def _parse_command_line() -> argparse.Namespace:
+    """
+    Parses the command line arguments to get the sitemap URL and any other options.
+
+    Returns:
+        Namespace: The parsed arguments
+    """
+    parser = argparse.ArgumentParser(description="Crawl URLs from a sitemap")
+    parser.add_argument("sitemap_url", type=str, help="URL of the sitemap")
+    parser.add_argument(
+        "--html-output",
+        action="store_true",
+        help="Save HTML instead of markdown",
+    )
+
+    args = parser.parse_args()
+    return args
+
+
 async def main():
-    sitemap_url = _get_sitemap_url()
-    child_sitemaps = _get_child_sitemaps(sitemap_url)
+    args = _parse_command_line()
+    child_sitemaps = _get_child_sitemaps(args.sitemap_url)
 
     urls: list[str] = []
     for child_sitemap in child_sitemaps:
@@ -174,7 +185,7 @@ async def main():
             os.makedirs(__output__)
 
         logger.info("Found %s URLs to crawl", len(urls))
-        await _crawl_parallel(urls, max_concurrent=10)
+        await _crawl_parallel(urls, args.html_output, max_concurrent=10)
     else:
         logger.warning("No URLs found to crawl")
 
