@@ -21,7 +21,7 @@ from crawl4ai import (AsyncWebCrawler, BrowserConfig, CacheMode,
                       CrawlerRunConfig, CrawlResult)
 
 
-async def crawl_parallel(urls: List[str], max_concurrent: int = 3):
+async def _crawl_parallel(urls: List[str], max_concurrent: int = 3):
     logger.info("\n=== Parallel Crawling with Browser Reuse ===")
 
     # Minimal browser config
@@ -61,7 +61,7 @@ async def crawl_parallel(urls: List[str], max_concurrent: int = 3):
                     fail_count += 1
                 elif result.success:
                     success_count += 1
-                    save_markdown_to_result_dir(result)
+                    _save_markdown_to_result_dir(result)
                 else:
                     fail_count += 1
 
@@ -74,7 +74,7 @@ async def crawl_parallel(urls: List[str], max_concurrent: int = 3):
         await crawler.close()
 
 
-def save_markdown_to_result_dir(result: CrawlResult):
+def _save_markdown_to_result_dir(result: CrawlResult):
     """
     Saves the markdown content to a file in the output directory.
 
@@ -93,7 +93,7 @@ def save_markdown_to_result_dir(result: CrawlResult):
             f.write(result.markdown)  # pyright: ignore [reportArgumentType]
 
 
-def get_urls_to_crawl(sitemap_url: str) -> list[str]:
+def _get_urls_to_crawl(sitemap_url: str) -> list[str]:
     """
     Fetches all URLs from the sitemap.
 
@@ -119,7 +119,7 @@ def get_urls_to_crawl(sitemap_url: str) -> list[str]:
         return []
 
 
-def get_sitemap_url() -> str:
+def _get_sitemap_url() -> str:
     """
     Parses the command line arguments to get the sitemap URL.
 
@@ -132,7 +132,7 @@ def get_sitemap_url() -> str:
     return args.sitemap_url
 
 
-def get_child_sitemaps(base_sitemap_url: str) -> list[str]:
+def _get_child_sitemaps(base_sitemap_url: str) -> list[str]:
     """
     Fetches all child sitemaps from the base URL's sitemap.
 
@@ -161,12 +161,12 @@ def get_child_sitemaps(base_sitemap_url: str) -> list[str]:
 
 
 async def main():
-    sitemap_url = get_sitemap_url()
-    child_sitemaps = get_child_sitemaps(sitemap_url)
+    sitemap_url = _get_sitemap_url()
+    child_sitemaps = _get_child_sitemaps(sitemap_url)
 
     urls: list[str] = []
     for child_sitemap in child_sitemaps:
-        urls.extend(get_urls_to_crawl(child_sitemap))
+        urls.extend(_get_urls_to_crawl(child_sitemap))
 
     if urls:
         # Create the output directory if it doesn't exist
@@ -174,7 +174,7 @@ async def main():
             os.makedirs(__output__)
 
         logger.info("Found %s URLs to crawl", len(urls))
-        await crawl_parallel(urls, max_concurrent=10)
+        await _crawl_parallel(urls, max_concurrent=10)
     else:
         logger.warning("No URLs found to crawl")
 
