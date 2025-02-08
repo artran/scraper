@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import logging
 import os
 import sys
 from xml.etree import ElementTree
@@ -8,6 +9,7 @@ import requests
 
 __location__ = os.path.dirname(os.path.abspath(__file__))
 __output__ = os.path.join(__location__, "output")
+logger = logging.getLogger(__name__)
 
 # Append parent directory to system path
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -20,7 +22,7 @@ from crawl4ai import (AsyncWebCrawler, BrowserConfig, CacheMode,
 
 
 async def crawl_parallel(urls: List[str], max_concurrent: int = 3):
-    print("\n=== Parallel Crawling with Browser Reuse ===")
+    logger.info("\n=== Parallel Crawling with Browser Reuse ===")
 
     # Minimal browser config
     browser_config = BrowserConfig(
@@ -55,7 +57,7 @@ async def crawl_parallel(urls: List[str], max_concurrent: int = 3):
             for url, result in zip(batch, results):
                 assert isinstance(result, (Exception, CrawlResult))
                 if isinstance(result, Exception):
-                    print(f"Error crawling {url}: {result}")
+                    logger.critical("Error crawling %s: %s", url, result)
                     fail_count += 1
                 elif result.success:
                     success_count += 1
@@ -63,12 +65,12 @@ async def crawl_parallel(urls: List[str], max_concurrent: int = 3):
                 else:
                     fail_count += 1
 
-        print(f"\nSummary:")
-        print(f"  - Successfully crawled: {success_count}")
-        print(f"  - Failed: {fail_count}")
+        logger.info("\nSummary:")
+        logger.info("  - Successfully crawled: %s", success_count)
+        logger.info("  - Failed: %s", fail_count)
 
     finally:
-        print("\nClosing crawler...")
+        logger.info("\nClosing crawler...")
         await crawler.close()
 
 
@@ -88,16 +90,18 @@ def save_markdown_to_result_dir(result: CrawlResult):
         # Save the markdown content to a file
         output_file = os.path.join(__output__, f"{filename}.md")
         with open(output_file, "w", encoding="utf-8") as f:
-            f.write(result.markdown)
+            f.write(result.markdown)  # pyright: ignore [reportArgumentType]
 
 
 def get_urls_to_crawl(sitemap_url: str) -> list[str]:
     """
-    Fetches all URLs from the base URL's sitemap.
+    Fetches all URLs from the sitemap.
 
     Returns:
         List[str]: List of URLs
     """
+    namespace = {"ns": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+
     try:
         response = requests.get(sitemap_url)
         response.raise_for_status()
@@ -106,13 +110,12 @@ def get_urls_to_crawl(sitemap_url: str) -> list[str]:
         root = ElementTree.fromstring(response.content)
 
         # Extract all URLs from the sitemap
-        # The namespace is usually defined in the root element
-        namespace = {"ns": "http://www.sitemaps.org/schemas/sitemap/0.9"}
         urls = [loc.text for loc in root.findall(".//ns:loc", namespace) if loc.text]
+        logger.info(f"Found %s URLs in sitemap", len(urls))
 
         return urls
     except Exception as e:
-        print(f"Error fetching sitemap: {e}")
+        logger.exception("Error fetching sitemap")
         return []
 
 
@@ -129,19 +132,54 @@ def get_sitemap_url() -> str:
     return args.sitemap_url
 
 
+def get_child_sitemaps(base_sitemap_url: str) -> list[str]:
+    """
+    Fetches all child sitemaps from the base URL's sitemap.
+
+    Returns:
+        List[str]: List of URLs for all child sitemaps
+    """
+    namespace = {"ns": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+
+    try:
+        response = requests.get(base_sitemap_url)
+        response.raise_for_status()
+
+        # Parse the XML
+        root = ElementTree.fromstring(response.content)
+
+        # Check if the sitemap has child sitemaps
+        if not root.tag.endswith("sitemapindex"):
+            return [base_sitemap_url]
+
+        urls = [loc.text for loc in root.findall(".//ns:loc", namespace) if loc.text]
+        logger.info("Found %s child sitemaps", len(urls))
+        return urls
+    except Exception as e:
+        logger.exception("Error fetching child sitemap")
+        return []
+
+
 async def main():
     sitemap_url = get_sitemap_url()
-    urls = get_urls_to_crawl(sitemap_url)
+    child_sitemaps = get_child_sitemaps(sitemap_url)
+
+    urls: list[str] = []
+    for child_sitemap in child_sitemaps:
+        urls.extend(get_urls_to_crawl(child_sitemap))
+
     if urls:
         # Create the output directory if it doesn't exist
         if not os.path.exists(__output__):
             os.makedirs(__output__)
 
-        print(f"Found {len(urls)} URLs to crawl")
+        logger.info("Found %s URLs to crawl", len(urls))
         await crawl_parallel(urls, max_concurrent=10)
     else:
-        print("No URLs found to crawl")
+        logger.warning("No URLs found to crawl")
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+
     asyncio.run(main())
